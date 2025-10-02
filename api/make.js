@@ -1,4 +1,4 @@
-// api/make.js — text-safe version (absolute <tspan y>, local font, one family)
+// api/make.js — renders text via @resvg/resvg-js; errors if font missing so you can see it
 import { Resvg } from '@resvg/resvg-js';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
@@ -7,32 +7,27 @@ import path from 'node:path';
 const WIDTH = 1080;
 const HEIGHT = 1080;
 
-// Resolve local font path: put Tajawal-Regular.ttf next to this file (api/Tajawal-Regular.ttf)
+// resolve local font (must exist at: api/Tajawal-Regular.ttf)
+// and be included via vercel.json -> includeFiles
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const LOCAL_FONT_PATH = path.join(__dirname, 'Tajawal-Regular.ttf');
 
-// --- utils ---
-const esc = (s) => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 
-function wrapArabic(text, maxPerLine, maxLines = 3) {
-  const words = String(text || '').trim().split(/\s+/);
-  const lines = [];
-  let line = '';
+function wrap(text, maxPerLine, maxLines = 3) {
+  const words = String(text||'').trim().split(/\s+/);
+  const lines = []; let line='';
   for (const w of words) {
     const t = line ? `${line} ${w}` : w;
     if (t.length <= maxPerLine) line = t;
-    else {
-      if (line) lines.push(line);
-      line = w;
-      if (lines.length === maxLines - 1) break;
-    }
+    else { if (line) lines.push(line); line = w; if (lines.length === maxLines-1) break; }
   }
   if (line && lines.length < maxLines) lines.push(line);
   return lines;
 }
 
-async function fetchAsDataUrl(url, fallbackMime = 'application/octet-stream') {
+async function toDataUrl(url, fallbackMime='application/octet-stream') {
   const r = await fetch(url, { headers: { 'user-agent': 'NGmisrRaster/1.0' } });
   if (!r.ok) throw new Error(`fetch ${url} -> ${r.status}`);
   const ct = r.headers.get('content-type') || fallbackMime;
@@ -40,29 +35,24 @@ async function fetchAsDataUrl(url, fallbackMime = 'application/octet-stream') {
   return `data:${ct};base64,${Buffer.from(ab).toString('base64')}`;
 }
 
-// --- SVG builder (no dy; each line has its own absolute y) ---
-function buildSVG({ bgDataUrl, title, w, h, fs, lh, debug }) {
-  const maxCharsPerLine = Math.max(16, Math.round(w / 36)); // crude measure that worked for you
-  const lines = wrapArabic(title, maxCharsPerLine, 3);
+function buildSVG({ bgDataUrl, title, w, h, fs, lh }) {
+  const lines = wrap(title, Math.max(16, Math.round(w/36)), 3);
 
-  const bandH = Math.round(h * 0.24);
-  const bandY = Math.round(h * 0.60);
-  const cx = Math.floor(w / 2);
+  const bandH = Math.round(h*0.24);
+  const bandY = Math.round(h*0.60);
+  const cx = Math.floor(w/2);
 
-  // Line metrics
-  const lineH = Math.round(fs * lh);
-  // Center block of N lines vertically within the band
-  const blockHeight = (lines.length - 1) * lineH;
-  const baseY = Math.round(bandY + bandH / 2 - blockHeight / 2);
+  // absolute line positions (no dy)
+  const lineH = Math.round(fs*lh);
+  const blockH = (lines.length - 1) * lineH;
+  const baseY = Math.round(bandY + bandH/2 - blockH/2);
 
-  const tspans = lines.map((ln, i) => {
-    const y = baseY + i * lineH;
-    return `<tspan x="${cx}" y="${y}">${esc(ln)}</tspan>`;
-  }).join('');
+  const tspans = lines.map((ln, i) =>
+    `<tspan x="${cx}" y="${baseY + i*lineH}">${esc(ln)}</tspan>`
+  ).join('');
 
-  // brand below
-  const brandGapTop = 50, brand1Size = 22, brand2Size = 20, brandGap = 6;
-  const lastLineY = baseY + (lines.length - 1) * lineH;
+  const brandGapTop=50, brand1Size=22, brand2Size=20, brandGap=6;
+  const lastLineY = baseY + (lines.length-1)*lineH;
   const brandYStart = lastLineY + brandGapTop;
 
   return `
@@ -71,12 +61,11 @@ function buildSVG({ bgDataUrl, title, w, h, fs, lh, debug }) {
   <rect x="0" y="${bandY}" width="${w}" height="${bandH}" fill="#D32D2D"/>
   <rect x="0" y="${bandY}" width="${w}" height="8" fill="#000" opacity="0.18"/>
 
-  <!-- HEADLINE (absolute positioned tspans) -->
-  <text
-    font-family="Tajawal" font-weight="400" font-size="${fs}"
-    direction="rtl" unicode-bidi="plaintext"
-    text-anchor="middle" fill="#ffffff"
-    stroke="rgba(0,0,0,0.75)" stroke-width="2">
+  <!-- HEADLINE -->
+  <text font-family="Tajawal" font-weight="400" font-size="${fs}"
+        direction="rtl" unicode-bidi="plaintext"
+        text-anchor="middle" fill="#ffffff"
+        stroke="rgba(0,0,0,0.75)" stroke-width="2">
     ${tspans}
   </text>
 
@@ -97,17 +86,26 @@ function buildSVG({ bgDataUrl, title, w, h, fs, lh, debug }) {
           font-family="Tajawal" font-weight="400" font-size="36"
           text-anchor="middle" fill="#ffffff" stroke="rgba(0,0,0,0.6)" stroke-width="1.5">عاجل</text>
   </g>
-
-  ${debug ? `<text x="24" y="46" font-family="Tajawal" font-size="28" fill="#00ff6a" stroke="#000" stroke-width="0.5">DBG</text>` : ''}
 </svg>`;
 }
 
-// --- render (load font locally; register with same exact family: "Tajawal")
-async function renderPng({ bg, title, w, fs, lh, debug }) {
-  const bgDataUrl = await fetchAsDataUrl(bg, 'image/jpeg');
+async function renderPng({ bg, title, w, fs, lh }) {
+  const bgDataUrl = await toDataUrl(bg, 'image/jpeg');
 
-  // Read local font bytes — no network, no CF blocking
-  const tajawalBytes = new Uint8Array(await readFile(LOCAL_FONT_PATH));
+  // read local font; if it’s missing, throw 500 (so you see it)
+  let fontBytes;
+  try {
+    fontBytes = new Uint8Array(await readFile(LOCAL_FONT_PATH));
+  } catch {
+    const err = new Error('FONT_NOT_FOUND: Did you commit api/Tajawal-Regular.ttf and includeFiles in vercel.json?');
+    err.code = 'FONT_NOT_FOUND';
+    throw err;
+  }
+  if (!fontBytes.length) {
+    const err = new Error('FONT_EMPTY: Bundled font is zero bytes.');
+    err.code = 'FONT_EMPTY';
+    throw err;
+  }
 
   const svg = buildSVG({
     bgDataUrl,
@@ -115,8 +113,7 @@ async function renderPng({ bg, title, w, fs, lh, debug }) {
     w: Number(w) || WIDTH,
     h: HEIGHT,
     fs: Number(fs) || 48,
-    lh: Number(lh) || 1.25,
-    debug
+    lh: Number(lh) || 1.25
   });
 
   const resvg = new Resvg(svg, {
@@ -128,25 +125,25 @@ async function renderPng({ bg, title, w, fs, lh, debug }) {
       sansSerifFamily: 'Tajawal',
       serifFamily: 'Tajawal',
       monospaceFamily: 'Tajawal',
-      // Support across resvg-js versions:
-      fontFiles: [{ name: 'Tajawal', data: tajawalBytes, weight: 400, style: 'normal' }],
-      fonts:     [{ name: 'Tajawal', data: tajawalBytes }]
+      // Both keys for compatibility across resvg-js versions
+      fontFiles: [{ name: 'Tajawal', data: fontBytes, weight: 400, style: 'normal' }],
+      fonts:     [{ name: 'Tajawal', data: fontBytes }]
     }
   });
 
   return resvg.render().asPng();
 }
 
-// --- handler
 export default async function handler(req, res) {
   try {
-    const { bg, title, w, fs, lh, debug } = req.query || {};
+    const { bg, title, w, fs, lh } = req.query || {};
     if (!bg) return res.status(400).send('bg required');
-    const png = await renderPng({ bg, title, w, fs, lh, debug: debug === '1' });
+    const png = await renderPng({ bg, title, w, fs, lh });
     res.setHeader('Content-Type', 'image/png');
     res.setHeader('Cache-Control', 'no-cache');
     res.status(200).send(Buffer.from(png));
   } catch (e) {
-    res.status(500).json({ error: 'compose_failed', message: String(e) });
+    // fail LOUDLY so you can see the reason
+    res.status(500).json({ error: 'compose_failed', code: e.code || null, message: String(e) });
   }
 }
