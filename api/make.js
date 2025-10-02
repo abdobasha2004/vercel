@@ -1,14 +1,12 @@
-// api/make.js — Vercel Serverless: SVG→PNG via @resvg/resvg-js (Tajawal wired correctly)
+// api/make.js — minimal, inline-text attrs, one family name, Resvg font injection
 import { Resvg } from '@resvg/resvg-js';
 
 const WIDTH = 1080;
 const HEIGHT = 1080;
 const TAJAWAL_TTF = 'https://www.ngmisr.com/Tajawal-Regular.ttf';
 
-// ---------- small utils ----------
-const esc = (s) =>
-  String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-
+// ------- helpers
+const esc = (s) => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 function wrapArabic(text, maxPerLine, maxLines = 3) {
   const words = String(text || '').trim().split(/\s+/);
   const lines = [];
@@ -21,14 +19,12 @@ function wrapArabic(text, maxPerLine, maxLines = 3) {
   if (line && lines.length < maxLines) lines.push(line);
   return lines;
 }
-
 async function fetchBytes(url) {
   const r = await fetch(url, { headers: { 'user-agent': 'NGmisrRaster/1.0' } });
   if (!r.ok) throw new Error(`fetch ${url} -> ${r.status}`);
   return new Uint8Array(await r.arrayBuffer());
 }
-
-async function fetchAsDataUrl(url, fallbackMime = 'application/octet-stream') {
+async function fetchAsDataUrl(url, fallbackMime='application/octet-stream') {
   const r = await fetch(url, { headers: { 'user-agent': 'NGmisrRaster/1.0' } });
   if (!r.ok) throw new Error(`fetch ${url} -> ${r.status}`);
   const ct = r.headers.get('content-type') || fallbackMime;
@@ -36,7 +32,7 @@ async function fetchAsDataUrl(url, fallbackMime = 'application/octet-stream') {
   return `data:${ct};base64,${Buffer.from(ab).toString('base64')}`;
 }
 
-// ---------- SVG builder (use ONE family name: 'Tajawal')
+// ------- SVG builder (all text props inline; family name must match Resvg registration)
 function buildSVG({ bgDataUrl, title, w, h, fs, lh, debug }) {
   const lines = wrapArabic(title, Math.max(16, Math.round(w / 36)), 3);
   const lineH = Math.round(fs * lh);
@@ -46,51 +42,60 @@ function buildSVG({ bgDataUrl, title, w, h, fs, lh, debug }) {
   const cy = Math.floor(bandY + bandH / 2);
   const startDy = -((lines.length - 1) * lineH) / 2;
 
-  const headline = lines
-    .map((ln, i) => `<tspan x="${cx}" dy="${i === 0 ? startDy : lineH}">${esc(ln)}</tspan>`)
-    .join('');
+  const headline = lines.map((ln, i) =>
+    `<tspan x="${cx}" dy="${i === 0 ? startDy : lineH}">${esc(ln)}</tspan>`
+  ).join('');
 
   const brandGapTop = 50, brand1Size = 22, brand2Size = 20, brandGap = 6;
   const brandYStart = cy + (lines.length * lineH / 2) + brandGapTop;
 
   return `
-<svg xmlns="http://www.w3.org/2000/svg" xml:lang="ar" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">
-  <style>
-    /* IMPORTANT: the family name must match Resvg's registered font name */
-    .txt { font-family: 'Tajawal'; font-weight: 400; }
-    /* thin outline keeps text readable on bright photos */
-    .outline { paint-order: stroke; stroke: rgba(0,0,0,0.75); stroke-width: 2px; }
-  </style>
-
+<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" xml:lang="ar">
   <image href="${bgDataUrl}" x="0" y="0" width="${w}" height="${h}" preserveAspectRatio="xMidYMid slice"/>
   <rect x="0" y="${bandY}" width="${w}" height="${bandH}" fill="#D32D2D"/>
   <rect x="0" y="${bandY}" width="${w}" height="8" fill="#000" opacity="0.18"/>
 
-  <text class="txt outline" x="${cx}" y="${cy}" direction="rtl" unicode-bidi="plaintext"
-        text-anchor="middle" dominant-baseline="middle" fill="#fff" font-size="${fs}">
+  <!-- HEADLINE -->
+  <text x="${cx}" y="${cy}"
+        font-family="Tajawal" font-weight="400" font-size="${fs}"
+        direction="rtl" unicode-bidi="plaintext"
+        text-anchor="middle" dominant-baseline="middle"
+        fill="#ffffff" stroke="rgba(0,0,0,0.75)" stroke-width="2">
     ${headline}
   </text>
 
-  <text class="txt outline" x="${cx}" y="${brandYStart}" text-anchor="middle" direction="rtl"
-        fill="#fff" opacity="0.95" font-size="${brand1Size}">نجوم مصرية ®</text>
-  <text class="txt outline" x="${cx}" y="${brandYStart + brand1Size + brandGap}" text-anchor="middle"
-        fill="#fff" opacity="0.95" font-size="${brand2Size}">www.ngmisr.com</text>
+  <!-- BRAND -->
+  <text x="${cx}" y="${brandYStart}"
+        font-family="Tajawal" font-weight="400" font-size="${brand1Size}"
+        text-anchor="middle" direction="rtl"
+        fill="#ffffff" stroke="rgba(0,0,0,0.5)" stroke-width="1.2">نجوم مصرية ®</text>
+  <text x="${cx}" y="${brandYStart + brand1Size + brandGap}"
+        font-family="Tajawal" font-weight="400" font-size="${brand2Size}"
+        text-anchor="middle"
+        fill="#ffffff" stroke="rgba(0,0,0,0.5)" stroke-width="1.2">www.ngmisr.com</text>
 
+  <!-- BADGE -->
   <g transform="translate(${w - 220}, 60)">
     <rect x="0" y="0" rx="10" ry="10" width="180" height="64" fill="#E53935"/>
-    <text class="txt outline" x="90" y="43" fill="#fff" font-size="36" text-anchor="middle">عاجل</text>
+    <text x="90" y="43"
+          font-family="Tajawal" font-weight="400" font-size="36"
+          text-anchor="middle" fill="#ffffff" stroke="rgba(0,0,0,0.6)" stroke-width="1.5">عاجل</text>
   </g>
 
-  ${debug ? `<text class="txt" x="24" y="46" fill="#00ff6a" font-size="28">DBG</text>` : ''}
+  ${debug ? `<text x="22" y="46" font-family="Tajawal" font-size="28" fill="#00ff6a" stroke="#000" stroke-width="0.5">DBG</text>` : ''}
 </svg>`;
 }
 
-// ---------- renderer: register the SAME name ('Tajawal') with Resvg
+// ------- render
 async function renderPng({ bg, title, w, fs, lh, debug }) {
   const bgDataUrl = await fetchAsDataUrl(bg, 'image/jpeg');
 
-  const tajawalBytes = await fetchBytes(TAJAWAL_TTF);
-  if (!tajawalBytes?.length) throw new Error('font-bytes-empty');
+  // Load Tajawal and register under the SAME name used in SVG ("Tajawal")
+  let tajawalBytes = null;
+  try { tajawalBytes = await fetchBytes(TAJAWAL_TTF); }
+  catch(e) { console.log('font fetch failed:', String(e)); }
+
+  console.log('font-bytes', tajawalBytes ? tajawalBytes.length : 0); // appears in Vercel logs
 
   const svg = buildSVG({
     bgDataUrl,
@@ -111,16 +116,20 @@ async function renderPng({ bg, title, w, fs, lh, debug }) {
       sansSerifFamily: 'Tajawal',
       serifFamily: 'Tajawal',
       monospaceFamily: 'Tajawal',
-      // Support both resvg-js variants (one of these keys will be used):
-      fontFiles: [{ name: 'Tajawal', data: tajawalBytes, weight: 400, style: 'normal' }],
-      fonts:     [{ name: 'Tajawal', data: tajawalBytes }]
+      // supply bytes only if we fetched them; Resvg will otherwise have no fonts
+      ...(tajawalBytes?.length
+        ? {
+            fontFiles: [{ name: 'Tajawal', data: tajawalBytes, weight: 400, style: 'normal' }],
+            fonts:     [{ name: 'Tajawal', data: tajawalBytes }]
+          }
+        : {})
     }
   });
 
   return resvg.render().asPng();
 }
 
-// ---------- Vercel API handler ----------
+// ------- handler
 export default async function handler(req, res) {
   try {
     const { bg, title, w, fs, lh, debug } = req.query || {};
