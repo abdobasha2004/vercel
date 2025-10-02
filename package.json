@@ -5,6 +5,8 @@
   "engines": { "node": ">=20" },
   "dependencies": {
     "@sparticuz/chromium": "^129.0.0",
-    "puppeteer-core": "^22.15.0"
+    "puppeteer-core": "^22.15.0",
+    "@resvg/resvg-js": "^2.6.0",
+    "node-fetch": "^3.3.2"
   }
 }
