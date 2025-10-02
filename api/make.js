@@ -1,3 +1,4 @@
+// api/make.js — Vercel Serverless: SVG→PNG via @resvg/resvg-js (fonts wired in Resvg options)
 import { Resvg } from '@resvg/resvg-js';
 
 const WIDTH = 1080;
@@ -15,17 +16,13 @@ function wrapArabic(text, maxPerLine, maxLines = 3) {
   for (const w of words) {
     const t = line ? `${line} ${w}` : w;
     if (t.length <= maxPerLine) line = t;
-    else {
-      if (line) lines.push(line);
-      line = w;
-      if (lines.length === maxLines - 1) break;
-    }
+    else { if (line) lines.push(line); line = w; if (lines.length === maxLines - 1) break; }
   }
   if (line && lines.length < maxLines) lines.push(line);
   return lines;
 }
 
-async function toDataUrl(url, fallbackMime = 'application/octet-stream') {
+async function fetchAsDataUrl(url, fallbackMime = 'application/octet-stream') {
   const r = await fetch(url, { headers: { 'user-agent': 'NGmisrRaster/1.0' } });
   if (!r.ok) throw new Error(`fetch ${url} -> ${r.status}`);
   const ct = r.headers.get('content-type') || fallbackMime;
@@ -34,7 +31,7 @@ async function toDataUrl(url, fallbackMime = 'application/octet-stream') {
   return `data:${ct};base64,${b64}`;
 }
 
-function buildSVG({ bgDataUrl, fontDataUrl, title, w, h, fs, lh }) {
+function buildSVG({ bgDataUrl, title, w, h, fs, lh }) {
   const lines = wrapArabic(title, Math.max(16, Math.round(w / 36)), 3);
   const lineH = Math.round(fs * lh);
   const bandH = Math.round(h * 0.24);
@@ -50,22 +47,15 @@ function buildSVG({ bgDataUrl, fontDataUrl, title, w, h, fs, lh }) {
   const brandGapTop = 50, brand1Size = 22, brand2Size = 20, brandGap = 6;
   const brandYStart = cy + (lines.length * lineH / 2) + brandGapTop;
 
+  // NOTE: we use generic family names (sans-serif) and map them to Tajawal via Resvg options.
   return `
 <svg xmlns="http://www.w3.org/2000/svg" xml:lang="ar" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">
-  <defs>
-    <style>
-      @font-face{
-        font-family:'TajawalNG';
-        src:url('${fontDataUrl}') format('truetype');
-        font-weight:400; font-style:normal; font-display:swap;
-      }
-      /* fallback to Arial if Tajawal fails */
-      .headline, .brand, .badge {
-        font-family: TajawalNG, Arial, sans-serif;
-        font-weight:400;
-      }
-    </style>
-  </defs>
+  <style>
+    .headline, .brand, .badge {
+      font-family: sans-serif;
+      font-weight: 400;
+    }
+  </style>
 
   <image href="${bgDataUrl}" x="0" y="0" width="${w}" height="${h}" preserveAspectRatio="xMidYMid slice"/>
   <rect x="0" y="${bandY}" width="${w}" height="${bandH}" fill="#D32D2D"/>
@@ -90,12 +80,17 @@ function buildSVG({ bgDataUrl, fontDataUrl, title, w, h, fs, lh }) {
 
 // ---------- renderer ----------
 async function renderPng({ bg, title, w, fs, lh }) {
-  const bgDataUrl = await toDataUrl(bg, 'image/jpeg');
-  const fontDataUrl = await toDataUrl(TAJAWAL_TTF, 'font/ttf');
+  // 1) embed BG bitmap
+  const bgDataUrl = await fetchAsDataUrl(bg, 'image/jpeg');
 
+  // 2) fetch Tajawal font bytes (pass to Resvg options — no @font-face)
+  const fontResp = await fetch(TAJAWAL_TTF, { headers: { 'user-agent': 'NGmisrRaster/1.0' } });
+  if (!fontResp.ok) throw new Error(`font ${TAJAWAL_TTF} -> ${fontResp.status}`);
+  const fontBytes = new Uint8Array(await fontResp.arrayBuffer());
+
+  // 3) build SVG with generic font family names
   const svg = buildSVG({
     bgDataUrl,
-    fontDataUrl,
     title: title || 'اختبار',
     w: Number(w) || WIDTH,
     h: HEIGHT,
@@ -103,9 +98,24 @@ async function renderPng({ bg, title, w, fs, lh }) {
     lh: Number(lh) || 1.25
   });
 
+  // 4) render to PNG; map all generic families to Tajawal
   const resvg = new Resvg(svg, {
     fitTo: { mode: 'width', value: Number(w) || WIDTH },
-    background: null
+    background: null,
+    font: {
+      loadSystemFonts: false,
+      // Use Tajawal whenever SVG asks for these generics:
+      defaultFontFamily: 'TajawalNG',
+      sansSerifFamily: 'TajawalNG',
+      serifFamily: 'TajawalNG',
+      monospaceFamily: 'TajawalNG',
+      // Provide the bytes + the name we reference above:
+      fontFiles: [{ name: 'TajawalNG', data: fontBytes, weight: 400, style: 'normal' }]
+      // Some versions use `fonts` or `fontBuffers`; the above `fontFiles` key
+      // is accepted by current @resvg/resvg-js. If your lockfile pins an older
+      // version, switch this line to:
+      // fonts: [{ name: 'TajawalNG', data: fontBytes }]
+    }
   });
 
   return resvg.render().asPng();
