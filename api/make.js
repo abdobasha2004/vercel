@@ -1,127 +1,129 @@
-// /api/make.js
-import chromium from "@sparticuz/chromium";
-import puppeteer from "puppeteer-core";
-import { readFile } from "node:fs/promises";
+// api/main.js — SVG→PNG (Vercel Serverless) using resvg-js (Chromium-free)
 
-export const config = { runtime: "nodejs", memory: 1536, maxDuration: 20 };
+import { Resvg } from '@resvg/resvg-js';
 
+// If this project is a plain Serverless Functions repo, keep this export.
+// If it's a Next.js API route, export default (req, res). Both shown below.
+
+// ---------- Config ----------
 const WIDTH = 1080, HEIGHT = 1080;
-const DEFAULT_FONT_FAMILY = "Tajawal";
-const DEFAULT_FONT_WEIGHT = 400;
-const DEFAULT_FONT_SIZE = 64;
-const DEFAULT_LINE_HEIGHT = 1.12;
-const DEFAULT_TEXT_WIDTH = 1000;
+const SELF_HOSTED_TTF = 'https://www.ngmisr.com/Tajawal-Regular.ttf';
 
-function escapeHtml(s = "") {
-  return String(s).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+// ---------- helpers ----------
+function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+function wrapArabic(text, maxPerLine, maxLines = 3) {
+  const words = String(text || '').trim().split(/\s+/);
+  const lines = [];
+  let line = '';
+  for (const w of words) {
+    const t = line ? `${line} ${w}` : w;
+    if (t.length <= maxPerLine) line = t;
+    else { if (line) lines.push(line); line = w; if (lines.length === maxLines - 1) break; }
+  }
+  if (line && lines.length < maxLines) lines.push(line);
+  return lines;
 }
 
-function buildHtml({ bg, title, fontDataUrl, fontFamily, fontWeight, fontSize, lineHeight, textWidth }) {
-  const bandH = Math.round(HEIGHT * 0.24);
-  const bandY = Math.round(HEIGHT * 0.60);
-  return `<!doctype html>
-<html lang="ar" dir="rtl">
-<head>
-  <meta charset="utf-8" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self' data: blob:; img-src * data: blob:; style-src 'unsafe-inline' data:; font-src data:; script-src 'none';" />
-  <style>
-    @font-face {
-      font-family: '${fontFamily}';
-      src: url('${fontDataUrl}') format('truetype');
-      font-weight: ${fontWeight};
-      font-style: normal;
-      font-display: swap;
-    }
-    html, body { margin:0; padding:0; width:${WIDTH}px; height:${HEIGHT}px; overflow:hidden; background:transparent; }
-    .stage { position:relative; width:${WIDTH}px; height:${HEIGHT}px;
-             background-image:url("${bg}"); background-size:cover; background-position:center; }
-    .band { position:absolute; left:0; top:${bandY}px; width:100%; height:${bandH}px; background:#D32D2D; }
-    .band-shadow { position:absolute; left:0; top:${bandY}px; width:100%; height:8px; background:rgba(0,0,0,0.18); }
-    .headline { position:absolute; inset:${bandY}px 0 auto 0; height:${bandH}px;
-                display:grid; place-items:center; text-align:center; color:#fff; direction:rtl; unicode-bidi:plaintext; }
-    .headline-inner { font-family:'${fontFamily}', sans-serif; font-weight:${fontWeight};
-                      font-size:${fontSize}px; line-height:${lineHeight};
-                      max-width:${textWidth}px; padding:0 8px; overflow-wrap:break-word; word-break:break-word; white-space:normal; }
-    .brand { position:absolute; top:${bandY + Math.floor(bandH/2) + 44}px; left:0; width:100%;
-             text-align:center; color:#fff; opacity:.95; font-family:'${fontFamily}', sans-serif; direction:rtl; }
-    .brand .line1 { font-size:22px; }
-    .brand .line2 { font-size:20px; margin-top:6px; }
-    .badge { position:absolute; right:40px; top:60px; width:180px; height:64px; background:#E53935; border-radius:10px; display:grid; place-items:center; }
-    .badge span { color:#fff; font-size:36px; font-family:'${fontFamily}', sans-serif; font-weight:${fontWeight}; }
-  </style>
-</head>
-<body>
-  <div class="stage">
-    <div class="band-shadow"></div>
-    <div class="band"></div>
-    <div class="headline"><div class="headline-inner">${escapeHtml(title)}</div></div>
-    <div class="brand"><div class="line1">نجوم مصرية ®</div><div class="line2">www.ngmisr.com</div></div>
-    <div class="badge"><span>عاجل</span></div>
-  </div>
-</body>
-</html>`;
+function abToBase64(ab){
+  const bytes = new Uint8Array(ab); let binary = '';
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk){
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+  }
+  return Buffer.from(binary, 'binary').toString('base64');
 }
 
-function j(res, code, obj) {
-  res.status(code).setHeader("content-type", "application/json").send(JSON.stringify(obj));
+async function loadFontDataUrl() {
+  const r = await fetch(SELF_HOSTED_TTF, {
+    headers: { 'user-agent': 'NGmisrRaster/1.0', 'accept': 'font/ttf,*/*' }
+  });
+  if (!r.ok) return 'data:font/ttf;base64,AA==';
+  const ab = await r.arrayBuffer();
+  return `data:font/ttf;base64,${abToBase64(ab)}`;
 }
 
+function buildSVG({ bg, title, w=WIDTH, h=HEIGHT, fs=48, lh=1.25 }) {
+  const lines = wrapArabic(title, Math.max(16, Math.round((w/36))), 3);
+  const lineH = Math.round(fs * lh);
+  const bandH = Math.round(h * 0.24);
+  const bandY = Math.round(h * 0.60);
+  const cx = Math.floor(w/2);
+  const cy = Math.floor(bandY + bandH/2);
+  const startDy = -((lines.length - 1) * lineH) / 2;
+
+  const headline = lines.map((ln, i) =>
+    `<tspan x="${cx}" dy="${i === 0 ? startDy : lineH}">${esc(ln)}</tspan>`
+  ).join('');
+
+  const brandGapTop=50, brand1Size=22, brand2Size=20, brandGap=6;
+  const brandArabic=`نجوم مصرية ®`;
+  const brandDomain=`www.ngmisr.com`;
+  const brandYStart= cy + (lines.length * lineH / 2) + brandGapTop;
+
+  return `
+<svg xmlns="http://www.w3.org/2000/svg" xml:lang="ar" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">
+  <defs>
+    <style id="fonts"></style>
+  </defs>
+
+  <image href="${esc(bg)}" x="0" y="0" width="${w}" height="${h}" preserveAspectRatio="xMidYMid slice" />
+  <rect x="0" y="${bandY}" width="${w}" height="${bandH}" fill="#D32D2D"/>
+  <rect x="0" y="${bandY}" width="${w}" height="8" fill="#000" opacity="0.18"/>
+
+  <text x="${cx}" y="${cy}" direction="rtl" unicode-bidi="plaintext" text-anchor="middle" dominant-baseline="middle" fill="#fff" font-size="${fs}" font-family="TajawalBold, Arial">
+    ${headline}
+  </text>
+
+  <text x="${cx}" y="${brandYStart}" text-anchor="middle" direction="rtl" fill="#fff" opacity="0.95" font-size="${brand1Size}" font-family="TajawalBold, Arial">${esc(brandArabic)}</text>
+  <text x="${cx}" y="${brandYStart + brand1Size + brandGap}" text-anchor="middle" fill="#fff" opacity="0.95" font-size="${brand2Size}" font-family="TajawalBold, Arial">${esc(brandDomain)}</text>
+
+  <g transform="translate(${w - 220}, 60)">
+    <rect x="0" y="0" rx="10" ry="10" width="180" height="64" fill="#E53935"/>
+    <text x="90" y="43" fill="#fff" font-size="36" text-anchor="middle" font-family="TajawalBold, Arial">عاجل</text>
+  </g>
+</svg>`;
+}
+
+async function renderPng({ bg, title, w, fs, lh }) {
+  const fontDataUrl = await loadFontDataUrl();
+  const svg = buildSVG({ bg, title, w: Number(w)||WIDTH, h: WIDTH, fs: Number(fs)||48, lh: Number(lh)||1.25 });
+
+  // Inject @font-face dynamically so resvg can use the font
+  const svgWithFont = svg.replace(
+    '<style id="fonts"></style>',
+    `<style>
+      @font-face {
+        font-family: 'TajawalBold';
+        src: url('${fontDataUrl}') format('truetype');
+        font-weight: 700;
+        font-style: normal;
+        font-display: swap;
+      }
+      text { font-family: TajawalBold, Arial, sans-serif; }
+    </style>`
+  );
+
+  const resvg = new Resvg(svgWithFont, {
+    fitTo: { mode: 'width', value: Number(w)||WIDTH },
+    background: null,
+  });
+  const png = resvg.render().asPng(); // Uint8Array
+  return png;
+}
+
+// ---------- Vercel handler (Serverless Functions) ----------
 export default async function handler(req, res) {
   try {
-    const { searchParams } = new URL(req.url, "http://localhost");
-    const bg = searchParams.get("bg");
-    const title = searchParams.get("title") || "اختبار";
-    if (!bg) return j(res, 400, { error: "bg_required" });
-
-    const fs = parseInt(searchParams.get("fs") || `${DEFAULT_FONT_SIZE}`, 10);
-    const w  = parseInt(searchParams.get("w")  || `${DEFAULT_TEXT_WIDTH}`, 10);
-    const lh = parseFloat(searchParams.get("lh") || `${DEFAULT_LINE_HEIGHT}`);
-
-    // Read font file relative to this module (works in serverless)
-    let fontBytes;
-    try {
-      fontBytes = await readFile(new URL("../fonts/Tajawal-Regular.ttf", import.meta.url));
-    } catch (e) {
-      return j(res, 500, {
-        error: "font_missing",
-        message: "fonts/Tajawal-Regular.ttf not found in deployment",
-        hint: "Add the file to /fonts and commit it. Path is case-sensitive."
-      });
+    const { bg, title = 'اختبار', w, fs, lh } = req.query || {};
+    if (!bg) {
+      res.status(400).send('bg required'); return;
     }
-    const fontDataUrl = `data:font/ttf;base64,${Buffer.from(fontBytes).toString("base64")}`;
-
-    const html = buildHtml({
-      bg, title, fontDataUrl,
-      fontFamily: DEFAULT_FONT_FAMILY,
-      fontWeight: DEFAULT_FONT_WEIGHT,
-      fontSize: fs, lineHeight: lh, textWidth: w
-    });
-
-    const executablePath = await chromium.executablePath();
-    const browser = await puppeteer.launch({
-      executablePath,
-      headless: chromium.headless,
-      args: [
-        ...chromium.args,
-        "--no-sandbox", "--disable-setuid-sandbox",
-        "--disable-dev-shm-usage", "--disable-gpu",
-        `--window-size=${WIDTH},${HEIGHT}`
-      ],
-      defaultViewport: { width: WIDTH, height: HEIGHT, deviceScaleFactor: 1 },
-      ignoreHTTPSErrors: true
-    });
-
-    const page = await browser.newPage();
-    await page.setViewport({ width: WIDTH, height: HEIGHT, deviceScaleFactor: 1 });
-    await page.setContent(html, { waitUntil: "networkidle0" });
-
-    const png = await page.screenshot({ type: "png", clip: { x: 0, y: 0, width: WIDTH, height: HEIGHT } });
-    await browser.close();
-
-    res.setHeader("content-type", "image/png");
-    res.setHeader("cache-control", "no-store");
-    res.status(200).send(png);
+    const png = await renderPng({ bg, title, w, fs, lh });
+    res.setHeader('Content-Type', 'image/png');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.status(200).send(Buffer.from(png));
   } catch (e) {
-    return j(res, 500, { error: "compose_failed", message: String(e) });
+    res.status(500).json({ error: 'compose_failed', message: String(e) });
   }
 }
