@@ -1,9 +1,11 @@
 // /api/diag.js
 import chromium from "@sparticuz/chromium";
-import chromiumPkg from "@sparticuz/chromium/package.json" assert { type: "json" };
+import { createRequire } from "node:module";
+const require = createRequire(import.meta.url);
+const chromiumPkg = require("@sparticuz/chromium/package.json");
 
 export const config = {
-  runtime: "nodejs",
+  runtime: "nodejs",  // Node version is chosen in Vercel → Settings → Functions (set to 20)
   memory: 256,
   maxDuration: 10
 };
