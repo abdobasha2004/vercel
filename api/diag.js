@@ -1,14 +1,16 @@
 // /api/diag.js
 import chromium from "@sparticuz/chromium";
 
-// Put the runtime on the file (no vercel.json needed)
-export const config = { runtime: "nodejs20.x", memory: 256, maxDuration: 10 };
+export const config = {
+  runtime: "nodejs",  // ← must be "nodejs" here (Node 20 is chosen in dashboard)
+  memory: 256,
+  maxDuration: 10
+};
 
 export default async function handler(req, res) {
   try {
     const exec = await chromium.executablePath().catch(() => null);
     const chromiumPkg = await import("@sparticuz/chromium/package.json");
-
     res
       .status(200)
       .setHeader("content-type", "application/json")
