@@ -48,8 +48,6 @@ function buildSVG({ bgDataUrl, fontDataUrl, title, w, h, fs, lh }) {
     .join('');
 
   const brandGapTop = 50, brand1Size = 22, brand2Size = 20, brandGap = 6;
-  const brandArabic = 'نجوم مصرية ®';
-  const brandDomain = 'www.ngmisr.com';
   const brandYStart = cy + (lines.length * lineH / 2) + brandGapTop;
 
   return `
@@ -57,11 +55,15 @@ function buildSVG({ bgDataUrl, fontDataUrl, title, w, h, fs, lh }) {
   <defs>
     <style>
       @font-face{
-        font-family:'TajawalBold';
+        font-family:'TajawalNG';
         src:url('${fontDataUrl}') format('truetype');
-        font-weight:700; font-style:normal; font-display:swap;
+        font-weight:400; font-style:normal; font-display:swap;
       }
-      text{ font-family: TajawalBold, Arial, sans-serif; }
+      /* fallback to Arial if Tajawal fails */
+      .headline, .brand, .badge {
+        font-family: TajawalNG, Arial, sans-serif;
+        font-weight:400;
+      }
     </style>
   </defs>
 
@@ -69,27 +71,27 @@ function buildSVG({ bgDataUrl, fontDataUrl, title, w, h, fs, lh }) {
   <rect x="0" y="${bandY}" width="${w}" height="${bandH}" fill="#D32D2D"/>
   <rect x="0" y="${bandY}" width="${w}" height="8" fill="#000" opacity="0.18"/>
 
-  <text x="${cx}" y="${cy}" direction="rtl" unicode-bidi="plaintext"
+  <text class="headline" x="${cx}" y="${cy}" direction="rtl" unicode-bidi="plaintext"
         text-anchor="middle" dominant-baseline="middle" fill="#fff" font-size="${fs}">
     ${headline}
   </text>
 
-  <text x="${cx}" y="${brandYStart}" text-anchor="middle" direction="rtl"
-        fill="#fff" opacity="0.95" font-size="${brand1Size}">${esc(brandArabic)}</text>
-  <text x="${cx}" y="${brandYStart + brand1Size + brandGap}" text-anchor="middle"
-        fill="#fff" opacity="0.95" font-size="${brand2Size}">${esc(brandDomain)}</text>
+  <text class="brand" x="${cx}" y="${brandYStart}" text-anchor="middle" direction="rtl"
+        fill="#fff" opacity="0.95" font-size="${brand1Size}">نجوم مصرية ®</text>
+  <text class="brand" x="${cx}" y="${brandYStart + brand1Size + brandGap}" text-anchor="middle"
+        fill="#fff" opacity="0.95" font-size="${brand2Size}">www.ngmisr.com</text>
 
   <g transform="translate(${w - 220}, 60)">
     <rect x="0" y="0" rx="10" ry="10" width="180" height="64" fill="#E53935"/>
-    <text x="90" y="43" fill="#fff" font-size="36" text-anchor="middle">عاجل</text>
+    <text class="badge" x="90" y="43" fill="#fff" font-size="36" text-anchor="middle">عاجل</text>
   </g>
 </svg>`;
 }
 
 // ---------- renderer ----------
 async function renderPng({ bg, title, w, fs, lh }) {
-  const bgDataUrl = await toDataUrl(bg, 'image/jpeg');       // embed BG bitmap
-  const fontDataUrl = await toDataUrl(TAJAWAL_TTF, 'font/ttf'); // embed font
+  const bgDataUrl = await toDataUrl(bg, 'image/jpeg');
+  const fontDataUrl = await toDataUrl(TAJAWAL_TTF, 'font/ttf');
 
   const svg = buildSVG({
     bgDataUrl,
@@ -106,17 +108,14 @@ async function renderPng({ bg, title, w, fs, lh }) {
     background: null
   });
 
-  return resvg.render().asPng(); // Uint8Array
+  return resvg.render().asPng();
 }
 
-// ---------- Vercel API handler ----------
+// ---------- handler ----------
 export default async function handler(req, res) {
   try {
     const { bg, title, w, fs, lh } = req.query || {};
-    if (!bg) {
-      res.status(400).send('bg required');
-      return;
-    }
+    if (!bg) return res.status(400).send('bg required');
     const png = await renderPng({ bg, title, w, fs, lh });
     res.setHeader('Content-Type', 'image/png');
     res.setHeader('Cache-Control', 'no-cache');
