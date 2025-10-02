@@ -1,13 +1,16 @@
 // /api/make.js
 // Renders a 1080x1080 PNG with background + Arabic headline in a red band + "عاجل" badge.
-// Uses Headless Chromium so Arabic shaping + @font-face work exactly like a browser.
+// Uses headless Chromium (Sparticuz) so Arabic shaping & @font-face render correctly.
 
 import chromium from "@sparticuz/chromium";
 import puppeteer from "puppeteer-core";
 import { readFile } from "node:fs/promises";
-import path from "node:path";
 
-export const config = { runtime: "nodejs20.x", memory: 1536, maxDuration: 20 };
+export const config = {
+  runtime: "nodejs",   // ← must be "nodejs" here
+  memory: 1536,
+  maxDuration: 20
+};
 
 const WIDTH = 1080;
 const HEIGHT = 1080;
@@ -16,7 +19,7 @@ const DEFAULT_FONT_FAMILY = "Tajawal";
 const DEFAULT_FONT_WEIGHT = 400;
 const DEFAULT_FONT_SIZE = 64;     // base headline size
 const DEFAULT_LINE_HEIGHT = 1.12; // tighter lines to fill band
-const DEFAULT_TEXT_WIDTH = 1000;  // px (increase -> less side padding)
+const DEFAULT_TEXT_WIDTH = 1000;  // px (increase → less side padding)
 
 function escapeHtml(s = "") {
   return String(s).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
@@ -105,17 +108,17 @@ export default async function handler(req, res) {
     const title = searchParams.get("title") || "اختبار";
     if (!bg) return j(res, 400, { error: "bg_required" });
 
+    // Tunables
     const fs = parseInt(searchParams.get("fs") || `${DEFAULT_FONT_SIZE}`, 10);
     const w  = parseInt(searchParams.get("w")  || `${DEFAULT_TEXT_WIDTH}`, 10);
     const lh = parseFloat(searchParams.get("lh") || `${DEFAULT_LINE_HEIGHT}`);
 
-    const fontPath = path.join(process.cwd(), "fonts", "Tajawal-Regular.ttf");
-    const fontBytes = await readFile(fontPath);
+    // Read font file from repo (no vercel.json include needed when you read via import.meta.url)
+    const fontBytes = await readFile(new URL("../fonts/Tajawal-Regular.ttf", import.meta.url));
     const fontDataUrl = `data:font/ttf;base64,${Buffer.from(fontBytes).toString("base64")}`;
 
     const html = buildHtml({
-      bg,
-      title,
+      bg, title,
       fontDataUrl,
       fontFamily: DEFAULT_FONT_FAMILY,
       fontWeight: DEFAULT_FONT_WEIGHT,
@@ -126,7 +129,10 @@ export default async function handler(req, res) {
 
     const executablePath = await chromium.executablePath();
     if (!executablePath) {
-      return j(res, 500, { error: "no_chromium", hint: "This must run on Node.js Serverless (not Edge). See /api/diag." });
+      return j(res, 500, {
+        error: "no_chromium",
+        hint: "Ensure this function is Serverless (not Edge). Check /api/diag."
+      });
     }
 
     const browser = await puppeteer.launch({
@@ -146,7 +152,11 @@ export default async function handler(req, res) {
     await page.setViewport({ width: WIDTH, height: HEIGHT, deviceScaleFactor: 1 });
     await page.setContent(html, { waitUntil: "networkidle0" });
 
-    const png = await page.screenshot({ type: "png", clip: { x: 0, y: 0, width: WIDTH, height: HEIGHT } });
+    const png = await page.screenshot({
+      type: "png",
+      clip: { x: 0, y: 0, width: WIDTH, height: HEIGHT }
+    });
+
     await browser.close();
 
     res.setHeader("content-type", "image/png");
