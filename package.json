@@ -1,0 +1,10 @@
+{
+  "name": "ngmisr-rasterizer",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=20" },
+  "dependencies": {
+    "@sparticuz/chromium": "^129.0.0",
+    "puppeteer-core": "^22.15.0"
+  }
+}
