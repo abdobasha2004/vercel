@@ -5,7 +5,7 @@ const require = createRequire(import.meta.url);
 const chromiumPkg = require("@sparticuz/chromium/package.json");
 
 export const config = {
-  runtime: "nodejs",  // Node version is chosen in Vercel → Settings → Functions (set to 20)
+  runtime: "nodejs",
   memory: 256,
   maxDuration: 10
 };
@@ -13,7 +13,6 @@ export const config = {
 export default async function handler(req, res) {
   try {
     const exec = await chromium.executablePath().catch(() => null);
-
     res
       .status(200)
       .setHeader("content-type", "application/json")
