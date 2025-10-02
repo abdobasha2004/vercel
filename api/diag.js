@@ -1,8 +1,9 @@
 // /api/diag.js
 import chromium from "@sparticuz/chromium";
+import chromiumPkg from "@sparticuz/chromium/package.json" assert { type: "json" };
 
 export const config = {
-  runtime: "nodejs",  // ← must be "nodejs" here (Node 20 is chosen in dashboard)
+  runtime: "nodejs",
   memory: 256,
   maxDuration: 10
 };
@@ -10,7 +11,7 @@ export const config = {
 export default async function handler(req, res) {
   try {
     const exec = await chromium.executablePath().catch(() => null);
-    const chromiumPkg = await import("@sparticuz/chromium/package.json");
+
     res
       .status(200)
       .setHeader("content-type", "application/json")
