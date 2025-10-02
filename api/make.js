@@ -112,7 +112,7 @@ async function renderPng({ bg, title, w, fs, lh, debug }) {
     title: title || 'اختبار',
     w: Number(w) || WIDTH,
     h: HEIGHT,
-    fs: Number(fs) || 48,
+    fs: Number(fs) || 32,
     lh: Number(lh) || 1.25,
     fontDataUrl: tajawalDataUrl,
     debug
