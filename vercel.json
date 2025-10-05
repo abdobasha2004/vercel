@@ -2,7 +2,8 @@
   "functions": {
     "api/make.js": {
       "runtime": "nodejs22.x",
-      "includeFiles": "api/Tajawal-Regular.ttf"
+      "memory": 1024,
+      "maxDuration": 15
     }
   }
 }
