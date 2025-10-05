@@ -1,6 +1,7 @@
 {
   "type": "module",
   "dependencies": {
-    "@resvg/resvg-js": "^2.6.0"
+    "@sparticuz/chromium": "^128.0.0",
+    "puppeteer-core": "^22.15.0"
   }
 }
